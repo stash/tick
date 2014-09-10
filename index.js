@@ -80,14 +80,14 @@ function doDisplay(data) {
   if (priceFloat <= lower) {
     str += price.bold.red;
     if (limitSaid !== 'lower') {
-      say('stop loss');
+      say('lower bound');
       limitSaid = 'lower';
     }
 
   } else if (priceFloat >= upper) {
     str += price.bold.green;
     if (limitSaid !== 'upper') {
-      say('price target');
+      say('upper bound');
       limitSaid = 'upper';
     }
 

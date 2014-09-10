@@ -2,13 +2,15 @@
 /*jshint node:true */
 'use strict';
 
+var version = require('./package.json').version;
 var request = require('request');
 var program = require('commander');
 var nextTime = require('next-time');
+var spawn = require('child_process').spawn;
 require('colors');
 
 program
-.version('0.0.0')
+.version(version)
 .usage('[options]')
 .option('-s, --symbol <sym>', 'stock symbol')
 .option('-u, --upper <n>', 'Upper limit', parseFloat)
@@ -36,6 +38,16 @@ function bail(err) {
   return process.exit(1);
 }
 
+function say(message) {
+  var opts = {
+    detached: true,
+    stdio: 'inherit', // stay attached to TTY
+  };
+  var sayProc = spawn('/usr/bin/say', [message], opts);
+  sayProc.unref();
+  process.stdout.write(message.bold + '\n');
+}
+
 function checkStock() {
   var symbolUrl = URL.replace('{symbol}', symbol);
   var opts = {
@@ -59,6 +71,7 @@ function checkStock() {
   });
 }
 
+var limitSaid = 'nothing';
 function doDisplay(data) {
   var str = data.lt_dts + ': ';
   var price = data.l;
@@ -66,10 +79,21 @@ function doDisplay(data) {
 
   if (priceFloat <= lower) {
     str += price.bold.red;
+    if (limitSaid !== 'lower') {
+      say('stop loss');
+      limitSaid = 'lower';
+    }
+
   } else if (priceFloat >= upper) {
     str += price.bold.green;
+    if (limitSaid !== 'upper') {
+      say('price target');
+      limitSaid = 'upper';
+    }
+
   } else {
     str += price;
+    limitSaid = 'nothing';
   }
 
   var change = data.c;
@@ -86,7 +110,14 @@ function doDisplay(data) {
   process.stdout.write(str);
 }
 
-var said = 'nothing';
+function sayLimits() {
+  process.stdout.write(symbol.blue.bold + ' -' +
+                       ' Upper: ' + (upper+'').green +
+                       ' Lower: ' + (lower+'').red +
+                       '\n');
+}
+
+var marketSaid = 'nothing';
 function checkState() {
   var today = (new Date().getDate());
   var nextOpen = nextTime(MARKET_OPEN).getDate();
@@ -94,19 +125,21 @@ function checkState() {
 
   if (nextClose === today && nextOpen !== today) {
     // market open!
-    if (said !== 'open') {
-      process.stdout.write("Market is open!".bold + '\n');
-      said = 'open';
+    if (marketSaid !== 'open') {
+      say("Market is open!");
+      sayLimits();
+      marketSaid = 'open';
     }
 
     checkStock();
 
   } else {
     // market is closed
-    if (said !== 'closed') {
-      process.stdout.write("Market is closed!".bold + '\n');
+    if (marketSaid !== 'closed') {
+      say("Market is closed!");
+      sayLimits();
       checkStock(); // one last time
-      said = 'closed';
+      marketSaid = 'closed';
     }
   }
 }

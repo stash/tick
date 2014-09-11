@@ -6,8 +6,9 @@ var version = require('./package.json').version;
 var request = require('request');
 var program = require('commander');
 var nextTime = require('next-time');
-var spawn = require('child_process').spawn;
 require('colors');
+
+var SayState = require('./lib/say-state.js').SayState;
 
 program
 .version(version)
@@ -15,10 +16,11 @@ program
 .option('-s, --symbol <sym>', 'stock symbol')
 .option('-u, --upper <n>', 'Upper limit', parseFloat)
 .option('-l, --lower <n>', 'Lower limit', parseFloat)
+.option('-p, --period <n>', 'Poll period, in minutes)', parseFloat, 5.0)
 .parse(process.argv);
 
 
-var PERIOD = 5 * 60 * 1000;
+var DEFAULT_PERIOD = 5; // minutes
 var URL = 'https://finance.google.com/finance/info?client=ig&q={symbol}';
 var MARKET_OPEN = '6:30'; // PDT
 var MARKET_CLOSE = '13:00'; // PDT
@@ -26,9 +28,18 @@ var MARKET_CLOSE = '13:00'; // PDT
 var symbol = program.symbol;
 var upper = program.upper || 100.0;
 var lower = program.lower || 0.0;
+var period = program.period;
 
 if (!symbol) {
   return program.help();
+}
+
+if (!period) {
+  period = DEFAULT_PERIOD;
+} else if (!period || period <= 1.0) {
+  console.error("Refusing to poll faster than one minute, "+
+                "setting to default "+DEFAULT_PERIOD+" minutes");
+  period = DEFAULT_PERIOD;
 }
 
 var jar = request.jar();
@@ -36,16 +47,6 @@ var jar = request.jar();
 function bail(err) {
   console.error(err.stack);
   return process.exit(1);
-}
-
-function say(message) {
-  var opts = {
-    detached: true,
-    stdio: 'inherit', // stay attached to TTY
-  };
-  var sayProc = spawn('/usr/bin/say', [message], opts);
-  sayProc.unref();
-  process.stdout.write(message.bold + '\n');
 }
 
 function checkStock() {
@@ -71,7 +72,12 @@ function checkStock() {
   });
 }
 
-var limitSaid = 'nothing';
+var limitState = new SayState({
+  'lower': 'Lower Bound!',
+  'upper': 'Upper Bound!',
+  'middle': 'in the middle.',
+});
+
 function doDisplay(data) {
   var str = data.lt_dts + ': ';
   var price = data.l;
@@ -79,21 +85,15 @@ function doDisplay(data) {
 
   if (priceFloat <= lower) {
     str += price.bold.red;
-    if (limitSaid !== 'lower') {
-      say('lower bound');
-      limitSaid = 'lower';
-    }
+    limitState.is('lower');
 
   } else if (priceFloat >= upper) {
     str += price.bold.green;
-    if (limitSaid !== 'upper') {
-      say('upper bound');
-      limitSaid = 'upper';
-    }
+    limitState.is('upper');
 
   } else {
     str += price;
-    limitSaid = 'nothing';
+    limitState.is('middle');
   }
 
   var change = data.c;
@@ -117,33 +117,34 @@ function sayLimits() {
                        '\n');
 }
 
-var marketSaid = 'nothing';
+var marketState = new SayState({
+  'open':   'Market is open!',
+  'closed': 'Market is closed.'
+});
 function checkState() {
   var today = (new Date().getDate());
   var nextOpen = nextTime(MARKET_OPEN).getDate();
   var nextClose = nextTime(MARKET_CLOSE).getDate();
 
   if (nextClose === today && nextOpen !== today) {
+    var wasOpen = marketState.is('open');
     // market open!
-    if (marketSaid !== 'open') {
-      say("Market is open!");
+    if (!wasOpen) {
       sayLimits();
-      marketSaid = 'open';
     }
 
     checkStock();
 
   } else {
     // market is closed
-    if (marketSaid !== 'closed') {
-      say("Market is closed!");
+    var wasClosed = marketState.is('closed');
+    if (!wasClosed) {
       sayLimits();
       checkStock(); // one last time
-      marketSaid = 'closed';
     }
   }
 }
 
-setInterval(checkState, PERIOD);
+setInterval(checkState, period * 60 * 1000);
 checkState();
 
